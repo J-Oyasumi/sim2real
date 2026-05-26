@@ -60,12 +60,16 @@ class StateProcessor:
     
     def reset(self):
         # Reset motion playback to the first frame (standing pose)
+        if self.motion_backend == "none":
+            return
         if self.motion_backend == "npz":
             self.motion_t[:] = 0
         self._update_motion_data()
 
     def update(self, data: Optional[Dict] = None):
         data = data or {}
+        if self.motion_backend == "none":
+            return
         paused = data.get("paused", False)
         if not paused and self.motion_backend == "npz":
             self.motion_t += 1
@@ -76,6 +80,23 @@ class StateProcessor:
         self._update_motion_data()
 
     def _init_motion_backend(self) -> None:
+        # Default to "none" when policy_config has no `motion` block — used by
+        # depth-based / non-tracking policies that do not need reference motion.
+        default_backend = "npz" if self.motion_config else "none"
+        motion_backend = str(
+            self.motion_config.get("motion_backend", default_backend)
+        ).lower().strip()
+        self.motion_config["motion_backend"] = self.motion_backend = motion_backend
+
+        if motion_backend == "none":
+            self.motion_dataset = None
+            self.motion_buffer = None
+            self.motion_future_steps = np.zeros(0, dtype=int)
+            self.motion_joint_names = []
+            self.motion_body_names = []
+            self.motion_length = 0
+            return
+
         self.motion_future_steps = np.array(
             self.motion_config.get("future_steps", []),
             dtype=int,
@@ -84,9 +105,6 @@ class StateProcessor:
             raise ValueError(
                 f"motion.future_steps must be 1D, got shape={self.motion_future_steps.shape}"
             )
-
-        motion_backend = str(self.motion_config.get("motion_backend", "npz")).lower().strip()
-        self.motion_config["motion_backend"] = self.motion_backend = motion_backend
 
         if motion_backend == "npz":
             motion_path = self.motion_config.get("motion_path")
@@ -120,6 +138,8 @@ class StateProcessor:
             raise ValueError(f"Unsupported motion_backend: {motion_backend}")
 
     def _update_motion_data(self):
+        if self.motion_backend == "none":
+            return
         if self.motion_backend == "npz":
             self.motion_data = self.motion_dataset.get_slice(
                 self.motion_ids,

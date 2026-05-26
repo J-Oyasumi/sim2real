@@ -48,6 +48,7 @@ PORTS = {
     "low_state": 5590,
     "low_cmd": 5591,
     "pico_controller": 5592,
+    "depth_image": 5580,
 }
 
 
@@ -99,6 +100,26 @@ class PicoControllerStateMessage:
             X=bool(x),
             Y=bool(y),
         )
+
+class DepthImageMessage:
+    """Binary depth frame (H x W float32, meters)."""
+
+    def __init__(self, image: np.ndarray):
+        self.image = np.asarray(image, dtype=np.float32)
+        if self.image.ndim != 2:
+            raise ValueError(f"DepthImageMessage expects 2D image, got shape {self.image.shape}")
+        self.height, self.width = self.image.shape
+
+    def to_bytes(self) -> bytes:
+        header = struct.pack('<II', self.height, self.width)
+        return header + self.image.tobytes()
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> 'DepthImageMessage':
+        h, w = struct.unpack('<II', data[:8])
+        image = np.frombuffer(data[8:], dtype=np.float32).reshape(h, w)
+        return cls(image)
+
 
 class PoseMessage:
     """Message format for body pose (position + quaternion)"""
